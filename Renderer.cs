@@ -153,7 +153,7 @@ namespace opentk3
                 stride += a.realSize * sizeof(float);
             int offset = 0;
 
-            for (int i = 0; i < shader.Attributes.Count; i++)
+            for (int i = 0; i < shader.Attributes.Length; i++)
             {
                 var attributeInfo = shader.Attributes[i];
                 GL.VertexAttribPointer(i, attributeInfo.realSize, VertexAttribPointerType.Float, false, stride, offset);
@@ -223,8 +223,8 @@ namespace opentk3
         public int AttributeCount = 0;
         public int UniformCount = 0;
 
-        public List<AttributeInfo> Attributes = [];
-        public List<UniformInfo> Uniforms = [];
+        public AttributeInfo[] Attributes = [];
+        public UniformInfo[] Uniforms = [];
 
 
         public FullShader(string vertexPath, string fragmentPath)
@@ -245,13 +245,16 @@ namespace opentk3
 
             GL.GetProgram(ProgramID, GetProgramParameterName.ActiveUniforms, out UniformCount);
 
+            Attributes = new AttributeInfo[AttributeCount];
+            Uniforms = new UniformInfo[UniformCount]; 
+
             for (int i = 0; i < AttributeCount; i++)
             {
                 AttributeInfo info = new AttributeInfo();
                 int length = 0;
                 GL.GetActiveAttrib(ProgramID, i, 256, out length, out info.size, out info.type, out info.name);
 
-                switch (info.type)
+                switch (info.type) //real size is used in stride caculations
                 {
                     case ActiveAttribType.FloatVec3:
                         info.realSize = 3;
@@ -271,15 +274,19 @@ namespace opentk3
                 }
                 info.address = GL.GetAttribLocation(ProgramID, info.name);
 
-                Attributes.Add(info);
+                Attributes[i] = (info);
             }
-
-            Attributes.Sort(delegate (AttributeInfo x, AttributeInfo y)
+            //attributes was orginally a list(hence why .Sort is there) but switched to arrays for faster handling
+            //too lazy to care about the opitmation of code that runs only a few times then never again
+            // hell, this was orginally orginally a dictonary
+            var attribList = Attributes.ToList();
+            attribList.Sort(delegate (AttributeInfo x, AttributeInfo y)
             {
                 if (x.address < y.address) return -1;
                 if (x.address > y.address) return 1;
                 return 0;
             });
+            Attributes = attribList.ToArray();
 
             for (int i = 0; i < UniformCount; i++)
             {
@@ -288,7 +295,7 @@ namespace opentk3
                 GL.GetActiveUniform(ProgramID, i, 256, out length, out info.size, out info.type, out info.name);
                 info.address = GL.GetUniformLocation(ProgramID, info.name);
 
-                Uniforms.Add(info);
+                Uniforms[i] = (info);
             }
         }
     }
