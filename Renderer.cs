@@ -89,6 +89,13 @@ namespace opentk3
         }
     }
 
+    public static class GlobalTables
+    {
+        public static Table[] tables = [];
+
+
+    }
+
     /// <summary>
     /// Contains a shader, drawing buffers, meshes and really everything needed to draw meshes
     /// </summary>
@@ -133,14 +140,13 @@ namespace opentk3
 
             shader = new FullShader(vertexPath, fragmentPath);
 
-            VertexBufferObject = GL.GenBuffer();
-            VertexArrayObject = GL.GenVertexArray();
-            ElementBufferObject = GL.GenBuffer();
+            GenerateBuffers();
 
             BindBuffers();
 
             LoadVAO();
         }
+
         /// <summary>
         /// this expects that the vao is already binded. sets up the attribute pointers for the vao
         /// </summary>
@@ -161,6 +167,13 @@ namespace opentk3
 
                 offset += attributeInfo.realSize * sizeof(float);
             }
+        }
+
+        public void GenerateBuffers()
+        {
+            VertexBufferObject = GL.GenBuffer();
+            VertexArrayObject = GL.GenVertexArray();
+            ElementBufferObject = GL.GenBuffer();
         }
 
         public void UpdateBuffer()

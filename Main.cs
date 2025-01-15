@@ -7,7 +7,9 @@ using System.Threading.Tasks;
 using opentk3;
 using Vector3 = OpenTK.Mathematics.Vector3;
 using Vector2 = OpenTK.Mathematics.Vector2;
+using Vector4 = OpenTK.Mathematics.Vector4;
 using static System.Runtime.InteropServices.JavaScript.JSType;
+using OpenTK.Mathematics;
 
 namespace opentk3
 {
@@ -24,11 +26,59 @@ namespace opentk3
             Rotation = Vector3.Zero,
             Scale    = Vector3.Zero;
 
+        public MeshData Mesh;
+
         public BasicObject()
         {
 
         }
     
+    }
+    public static class MatrixMath
+    {
+        public static (Vector3, Vector3) Forward(Vector3 Rotation)
+        {
+            Matrix4 rotMat = Matrix4.CreateRotationZ(Rotation.Z) * Matrix4.CreateRotationX(Rotation.X) * Matrix4.CreateRotationY(Rotation.Y);
+            return (Vector3.TransformNormal(-Vector3.UnitZ, rotMat), Vector3.TransformNormal(Vector3.UnitX, rotMat));
+        }
+    }
+
+    public class Camera
+    {
+        public Vector3 Position = Vector3.Zero;
+        public Vector3 Rotation = Vector3.Zero;
+        public Vector3 Forward = Vector3.UnitZ;
+        public Vector3 Right = Vector3.UnitX;
+
+        private const float ipi = (MathF.PI / 180f);
+        private const float api = (180f / MathF.PI);
+
+        private float fovRadians = 90f * ipi;
+
+        public float FieldOfViewDeg
+        {
+            get { return fovRadians * api; }
+            set { fovRadians = value * ipi; }
+        }
+
+        public float NearPlane = 0.01f;
+        public float FarPlane = 10000f;
+
+        public Camera()
+        {
+
+        }
+
+        public Matrix4 WorldToScreenMatrix(Vector2i ScreenSize)
+        {
+            (Forward, Right) = MatrixMath.Forward(Rotation);
+
+            var proj = Matrix4.CreatePerspectiveFieldOfView(fovRadians, (float)(ScreenSize.X / ScreenSize.Y), NearPlane, FarPlane);
+            var view = Matrix4.LookAt(Position, Position + Forward, Vector3.UnitY);
+            var viewProj = Matrix4.Mult(view, proj);
+            var mat = viewProj;
+            return mat;
+        }
     }
 
     public class MeshData
