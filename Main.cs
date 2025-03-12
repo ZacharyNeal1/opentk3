@@ -10,11 +10,56 @@ using Vector2 = OpenTK.Mathematics.Vector2;
 using Vector4 = OpenTK.Mathematics.Vector4;
 using static System.Runtime.InteropServices.JavaScript.JSType;
 using OpenTK.Mathematics;
+using OpenTK.Windowing.Common;
+using OpenTK.Windowing.GraphicsLibraryFramework;
+
 
 namespace opentk3
 {
     public class MainLoop
     {
+        public Renderer Renderer;
+
+        public Camera Camera = new Camera();
+
+        public MainLoop(Renderer r)
+        {
+            Renderer = r;
+            var a = new WavefrontFile("object4");
+            var b = new BasicObject();
+            b.Mesh = new MeshData(b,a);
+            var c = new Table(r, "Shaders\\shader.vert", "Shaders\\shader.frag");
+            b.Mesh.Shader = c;
+            c.Meshes.Add(b.Mesh);
+            Renderer.Tables.Add(c);
+
+            r.RenderFrame += RenderFrame;
+        }
+        private void RenderFrame(FrameEventArgs obj)
+        {
+            var Game = Renderer;
+            float speed = 2f;
+            float sd = speed * (float)obj.Time;
+            if (Game.IsKeyDown(Keys.S))
+                Camera.Position += -Camera.Forward * sd;
+            if (Game.IsKeyDown(Keys.W))
+                Camera.Position += Camera.Forward * sd;
+            if (Game.IsKeyDown(Keys.D))
+                Camera.Position += Camera.Right * sd;
+            if (Game.IsKeyDown(Keys.A))
+                Camera.Position += -Camera.Right * sd;
+
+            float camSpeed = 2f;
+            float cd = camSpeed * (float)obj.Time;
+            if (Game.IsKeyDown(Keys.Right))
+                Camera.Rotation += new Vector3(0, -cd, 0);
+            if (Game.IsKeyDown(Keys.Left))
+                Camera.Rotation += new Vector3(0, cd, 0);
+            if (Game.IsKeyDown(Keys.Up))
+                Camera.Rotation += new Vector3(cd, 0, 0);
+            if (Game.IsKeyDown(Keys.Down))
+                Camera.Rotation += new Vector3(-cd, 0, 0);
+        }
     }
 
     public class BasicObject
@@ -24,7 +69,7 @@ namespace opentk3
         public Vector3
             Position = Vector3.Zero,
             Rotation = Vector3.Zero,
-            Scale    = Vector3.Zero;
+            Scale    = Vector3.One;
 
         public MeshData Mesh;
 
@@ -114,6 +159,8 @@ namespace opentk3
             set { ChangeShader(value); }
         }
 
+        private int lastIndex = -1;
+
         public void ChangeShader(Table table)
         {
             var shader = table.shader;
@@ -143,7 +190,7 @@ namespace opentk3
                         break;
                 }
 
-                stride += (uint)attribs[i].size;
+                stride += (uint)attribs[i].realSize;
             }
         }
 
@@ -153,22 +200,83 @@ namespace opentk3
             Parent = parent;
         }
 
-        public MeshData(BasicObject parent, ObjFile data)
+        public MeshData(BasicObject parent, WavefrontFile data)
         {
             ID = count++;
             Parent = parent;
 
-            BasePoints = data.vertexes.ToArray();
+            BasePoints = data.Verts.ToArray();
 
-            Faces = IntArrayToUintArray(data.faceIndices.ToArray());
+            Faces = data.Faces.ToArray();
 
-            FaceTexutre = IntArrayToUintArray(data.textureIndexPerVertex.ToArray());
+            FaceTexutre = data.FaceMtl.ToArray();
 
-            TexCoords = data.textureCoordnatesPerVertex.ToArray();
+            TexCoords = new Vector2[BasePoints.Length];
+            for (int i = 0; i < BasePoints.Length; i++)
+                TexCoords[i] = data.TextureCoord[data.FaceTextureCoordIndex[i]];
 
-            Colors = new Vector4[data.vertexes.Count];
+            Colors = new Vector4[BasePoints.Length];
         }
-        private float positionHash = 0;
+
+        private float transformationHash = -1;
+        public void Transform()
+        {
+            Vector3 rot = Parent.Rotation;
+
+            float hash = (Parent.Position + rot + Parent.Scale).LengthFast;
+            if (transformationHash == hash)
+            {
+                return;
+            }
+            transformationHash = hash;
+
+            //Matrix4 x = Matrix4.CreateRotationX(rot.X),
+            //    y = Matrix4.CreateRotationY(rot.Y),
+            //    z = Matrix4.CreateRotationZ(rot.Z),
+
+            //    rotMat =
+            //    z * y * x;
+
+            Matrix4 fullMatrix =
+                (Matrix4.CreateRotationZ(rot.Z) *
+                Matrix4.CreateRotationY(rot.Y) *
+                Matrix4.CreateRotationX(rot.X))
+                *
+                Matrix4.CreateTranslation(Parent.Position)
+                *
+                Matrix4.CreateScale(Parent.Scale);
+
+
+            if (WorldPoints.Length != BasePoints.Length) WorldPoints = new Vector3[BasePoints.Length];
+
+            for (int i = 0; i < BasePoints.Length; i++)
+            {
+                WorldPoints[i] = Vector3.TransformPosition(BasePoints[i], fullMatrix);
+                //WorldPoints[i] = new Vector3(Vector3.TransformVector(BasePoints[i] - LocalCenter, rotMat) * scl + pos);
+            }
+        }
+        public void GenerateRenderData(int index)
+        {
+            uint RenderDataLength = (uint)WorldPoints.Length * stride;
+
+            if (RenderData.Length != RenderDataLength)
+                RenderData = new float[RenderDataLength];
+
+            if (RenderData1.Length != Faces.Length)
+                RenderData1 = new uint[Faces.Length];
+
+            if (lastIndex != index) // if the position of the vertexes change in the main list
+                for (int i = 0; i < Faces.Length; i++)
+                {
+                    RenderData1[i] = (uint)(Faces[i] + (index / stride)); //---------------------- unknown if "* stride" is needed
+                }
+            lastIndex = index;
+
+
+            foreach (Action a in RenderActions) a();
+        }
+
+        private float positionHash = -1;
         private void RenderPos(uint PreviousStride)
         {
             float hash = WorldPoints[0].LengthFast;

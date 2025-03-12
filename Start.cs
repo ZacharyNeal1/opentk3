@@ -1,6 +1,9 @@
 ﻿
+using System.IO;
 using System.Reflection;
 using OpenTK.Mathematics;
+using StbImageSharp;
+using OpenTK.Graphics.OpenGL4;
 
 namespace opentk3
 {
@@ -11,8 +14,8 @@ namespace opentk3
             System.Console.WriteLine("Hello, World!");
             foreach(string s in args)
             System.Console.WriteLine(s);
-            var a = new WavefrontFile("object4");
-
+            
+            
             using (Renderer game = new Renderer(800, 600, "LearnOpenTK"))
             {
                 //game.Tables
@@ -20,6 +23,108 @@ namespace opentk3
             }
         }
     }
+
+    public static class ShaderBuilder
+    {
+
+        public static string full = @"#version 330 core
+layout (location = 0) in vec3 Position;
+
+uniform mat4 view;
+
+void main()
+{
+   gl_Position = vec4(Position, 1.0) * view;
+}";
+
+        public static string full2 = @"#version 330 core
+out vec4 FragColor;
+
+void main()
+{
+    FragColor = vec4(1.0f, 0.5f, 0.2f, 1.0f);
+}";
+
+        public static Table FromMTL(Mtl mtl, Renderer r)
+        {
+            bool HasMap = false;
+            bool diffuseMap = mtl.diffuseMap != null,
+                specularMap = mtl.specularMap != null,
+                ambientMap = mtl.ambientMap != null;
+
+            if (diffuseMap || specularMap || ambientMap)
+                HasMap = true;
+
+
+            string VertShader = "";
+
+            VertShader += @"#version 330 core \nlayout(location = 0) in vec3 Position;\n";
+
+            if (HasMap)
+            {
+                VertShader += @"layout(location = 1) in vec2 TextureCoord;\n";
+                VertShader += @"\n";
+                VertShader += @"out vec2 texCoord;\n";
+            }
+            VertShader += @"\n";
+            VertShader += @"uniform mat4 view;";
+
+            VertShader += @"void main()\n{\n";
+            if (HasMap)
+            {
+                VertShader += @"texCoord = TextureCoord;\n";
+            }
+            VertShader += @"gl_Position = vec4(Position, 1.0) * view;\n";
+            VertShader += @"}";
+
+            string FragShader = "";
+
+            FragShader += @"#version 330 core \n\n";
+            FragShader += @"out vec4 FragColor;\n\n";
+            if (HasMap)
+            {
+                FragShader += @"in vec2 texCoord;\n\n";
+                if (diffuseMap) FragShader += @"uniform sampler2D diffuseMap;\n";
+                if (specularMap) FragShader += @"uniform sampler2D specularMap;\n";
+                if (ambientMap) FragShader += @"uniform sampler2D ambientMap;\n";
+            }
+            FragShader += @"void main()\n{\n";
+            FragShader += @"FragColor = vec4(1.0f, 0.5f, 0.2f, 1.0f);\n";
+            FragShader += @"}";
+
+            Table table = new Table(r, VertShader, FragShader, true);
+
+            StbImage.stbi_set_flip_vertically_on_load(1);
+
+            if (diffuseMap)
+            {
+                var t = new Texture(mtl.diffuseMap);
+                GL.Uniform1(table.shader.shader.GetUniformLocation("diffuseMap"), 0);
+            }
+
+
+            //if (diffuseMap) table.shader.shader.GetUniformLocation("diffuseMap");
+            return table;
+
+        }
+    }
+    public class Texture
+    {
+        int Handle;
+
+        public Texture(string path)
+        {
+            Handle = GL.GenTexture();
+            ImageResult image = ImageResult.FromStream(File.OpenRead(path), ColorComponents.RedGreenBlueAlpha);
+            Use();
+            GL.TexImage2D(TextureTarget.Texture2D, 0, PixelInternalFormat.Rgba, image.Width, image.Height, 0, PixelFormat.Rgba, PixelType.UnsignedByte, image.Data);
+        }
+        public void Use()
+        {
+            GL.BindTexture(TextureTarget.Texture2D, Handle);
+        }
+    }
+
     public class Mtl
     {
         public string name;
@@ -49,7 +154,7 @@ namespace opentk3
 
         public List<uint> FaceMtl = new List<uint>();
 
-        public List<uint> FaceTextureCoordIndex = new List<uint>();
+        public List<int> FaceTextureCoordIndex = new List<int>();
 
         public List<Mtl> mtls = new List<Mtl>();
 
@@ -60,76 +165,9 @@ namespace opentk3
             var obj = File.ReadAllLines("Objects\\" + Name + @".obj");
             var mtl = File.ReadAllLines("Objects\\" + Name + @".mtl");
 
-            for(int i = 0; i < mtl.Length; i++) //populate mtls
-            {
-                if (mtl[i].StartsWith("newmtl"))
-                {
-                    var newmtl = new Mtl(mtl[i].Substring(7));
+            IdentifyMtls(mtl);
 
-                    for (int a = i; a < mtl.Length; a ++)
-                    {
-                        var line = mtl[a];
-
-                        if (line.StartsWith("Kd"))
-                        {
-                            var val = line.Substring(3);
-                            var split = val.Split(' ');
-
-                            newmtl.diffuse = (new Vector3(float.Parse(split[0]), float.Parse(split[1]), float.Parse(split[2])));
-                        }
-
-                        if (line.StartsWith("Ka"))
-                        {
-                            var val = line.Substring(3);
-                            var split = val.Split(' ');
-
-                            newmtl.ambient = (new Vector3(float.Parse(split[0]), float.Parse(split[1]), float.Parse(split[2])));
-                        }
-
-                        if (line.StartsWith("Ks"))
-                        {
-                            var val = line.Substring(3);
-                            var split = val.Split(' ');
-
-                            newmtl.specular = (new Vector3(float.Parse(split[0]), float.Parse(split[1]), float.Parse(split[2])));
-                        }
-
-                        if (line.StartsWith("map_Kd"))
-                        {
-                            var val = line.Substring(7);
-                            newmtl.diffuseMap = val;
-                        }
-
-                        if (line.StartsWith("map_Ka"))
-                        {
-                            var val = line.Substring(7);
-                            newmtl.ambientMap = val;
-                        }
-
-                        if (line.StartsWith("map_Ks"))
-                        {
-                            var val = line.Substring(7);
-                            newmtl.specularMap = val;
-                        }
-
-                        if (line.Length < 1 || a + 1 == mtl.Length)
-                        {
-                            mtls.Add(newmtl);
-                            break;
-                        }
-                    }
-                }
-            }
-
-            foreach (string s in obj)
-            {
-                if (s.StartsWith("vt "))
-                {
-                    var val = s.Substring(3);
-                    var split = val.Split(' ');
-                    TextureCoord.Add(new Vector2(float.Parse(split[0]), float.Parse(split[1])));
-                }
-            }
+            IdentifyVertexTextureCoords(obj);
 
             for (int lineIndex = 0; lineIndex < obj.Length; lineIndex++)
             {
@@ -167,7 +205,7 @@ namespace opentk3
                                 {
                                     var split3 = split2[TriPoint].Split('/');
                                     Faces.Add(uint.Parse(split3[0])-1);
-                                    FaceTextureCoordIndex.Add(uint.Parse(split3[1]));
+                                    FaceTextureCoordIndex.Add(int.Parse(split3[1]));
                                 }
                                 FaceMtl.Add((uint)mtlIndex);
                             }
@@ -192,86 +230,77 @@ namespace opentk3
             }
 
         }
-    }
-
-    public class ObjFile
-    {
-        public List<Vector3> vertexes { get; set; }
-        public List<int> faceIndices { get; set; }
-        public List<int> textureIndexPerVertex { get; set; }
-        public List<Vector2> textureCoordnatesPerVertex { get; set; }
-
-        //fragment from a past project
-        //public static VertexStore DefaultVertexStore { get; set; }
-
-        string[] lines { get; set; }
-
-
-        public ObjFile(string name)
+        private void IdentifyVertexTextureCoords(string[] obj)
         {
-            vertexes = [];
-            faceIndices = [];
-            textureIndexPerVertex = [];
-            textureCoordnatesPerVertex = [];
-
-
-            string path = Path.Combine(Path.GetDirectoryName(Assembly.GetExecutingAssembly().Location), @"Objects/" + name + ".obj");
-
-            lines = File.ReadAllLines(path);
-            //var sections = new List<string[]>();
-            string input = "";
-            foreach (string s in File.ReadAllLines(path))
-                input += s + "\n";
-
-            for (int i = 0; i < lines.Length; i++)
+            foreach (string s in obj)
             {
-                var str = lines[i];
-
-                if (str.StartsWith("vt "))
+                if (s.StartsWith("vt "))
                 {
-                    var val = str.Substring(3);
+                    var val = s.Substring(3);
                     var split = val.Split(' ');
-                    textureCoordnatesPerVertex.Add(new Vector2(float.Parse(split[0]), float.Parse(split[1])));
+                    TextureCoord.Add(new Vector2(float.Parse(split[0]), float.Parse(split[1])));
                 }
-                if (str.StartsWith("v "))
+            }
+        }
+        private void IdentifyMtls(string[] mtl)
+        {
+            for (int i = 0; i < mtl.Length; i++) //populate mtls
+            {
+                if (mtl[i].StartsWith("newmtl"))
                 {
-                    var val = str.Substring(2);
-                    var split = val.Split(' ');
-                    vertexes.Add(new Vector3(float.Parse(split[0]), float.Parse(split[1]), float.Parse(split[2])));
-                }
-                if (str.StartsWith("f "))
-                {
+                    var newmtl = new Mtl(mtl[i].Substring(7));
 
-                    var val = str.Substring(2);
-                    var split = val.Split(' ');
+                    for (int a = i; a < mtl.Length; a++)
+                    {
+                        var line = mtl[a];
 
-                    if (!str.Contains("/"))
-                    {
-                        var f = new int[] { int.Parse(split[0]) - 1, int.Parse(split[1]) - 1, int.Parse(split[2]) - 1 };
-                        faceIndices.AddRange(f);
-                        textureIndexPerVertex.Add(-1);
-                        textureIndexPerVertex.Add(-1);
-                        textureIndexPerVertex.Add(-1);
-                    }
-                    else
-                    {
-                        var f = new int[]
+                        if (line.StartsWith("Kd"))
                         {
-                               int.Parse(split[0].Split('/')[0])-1,
-                               int.Parse(split[1].Split('/')[0])-1,
-                               int.Parse(split[2].Split('/')[0])-1,
-                        };
-                        faceIndices.AddRange(f);
-                        var b = split[0].Split('/');
-                        textureIndexPerVertex[int.Parse(b[0]) - 1] = int.Parse(b[1]) - 1;
-                        b = split[1].Split('/');
-                        textureIndexPerVertex[int.Parse(b[0]) - 1] = int.Parse(b[1]) - 1;
-                        b = split[2].Split('/');
-                        textureIndexPerVertex[int.Parse(b[0]) - 1] = int.Parse(b[1]) - 1;
+                            var val = line.Substring(3);
+                            var split = val.Split(' ');
+                            newmtl.diffuse = (new Vector3(float.Parse(split[0]), float.Parse(split[1]), float.Parse(split[2])));
+                        }
 
+                        if (line.StartsWith("Ka"))
+                        {
+                            var val = line.Substring(3);
+                            var split = val.Split(' ');
+                            newmtl.ambient = (new Vector3(float.Parse(split[0]), float.Parse(split[1]), float.Parse(split[2])));
+                        }
+
+                        if (line.StartsWith("Ks"))
+                        {
+                            var val = line.Substring(3);
+                            var split = val.Split(' ');
+                            newmtl.specular = (new Vector3(float.Parse(split[0]), float.Parse(split[1]), float.Parse(split[2])));
+                        }
+
+                        if (line.StartsWith("map_Kd"))
+                        {
+                            var val = line.Substring(7);
+                            newmtl.diffuseMap = val;
+                        }
+
+                        if (line.StartsWith("map_Ka"))
+                        {
+                            var val = line.Substring(7);
+                            newmtl.ambientMap = val;
+                        }
+
+                        if (line.StartsWith("map_Ks"))
+                        {
+                            var val = line.Substring(7);
+                            newmtl.specularMap = val;
+                        }
+
+                        if (line.Length < 1 || a + 1 == mtl.Length)
+                        {
+                            mtls.Add(newmtl);
+                            break;
+                        }
                     }
                 }
             }
         }
-    } //the inital for mesh data and a easy way to decompile obj files made by me :)
+    }
 }

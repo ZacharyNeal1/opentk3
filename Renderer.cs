@@ -10,6 +10,7 @@ using OpenTK.Windowing.Common;
 using OpenTK.Windowing.Desktop;
 using OpenTK.Windowing.GraphicsLibraryFramework;
 using OpenTK.Mathematics;
+using static System.Net.Mime.MediaTypeNames;
 
 namespace opentk3
 {
@@ -19,11 +20,13 @@ namespace opentk3
 
         public Renderer(int width, int height, string title) : base(GameWindowSettings.Default, new NativeWindowSettings() { Size = (width, height), Title = title }) { }
 
-        public Table[] Tables;
+        public List<Table> Tables = [];
 
         Table t;
         Table tb;
         Table tbb;
+
+        public MainLoop Game;
 
         protected override void OnLoad()
         {
@@ -32,17 +35,20 @@ namespace opentk3
 
             GL.ClearColor(0.2f, 0.3f, 0.3f, 1.0f);
 
-            t = new Table(this, "Shaders\\shader.vert", "Shaders\\shader.frag");
+            //t = new Table(this, ShaderBuilder.full, ShaderBuilder.full2, true);
+            //t = new Table(this, "Shaders\\shader.vert", "Shaders\\shader.frag");
             tb = new Table(this, "Shaders\\shader2.vert", "Shaders\\shader2.frag");
             tbb = new Table(this, "Shaders\\shader3.vert", "Shaders\\shader3.frag");
 
-            tbb.vertices =
+            //tbb.vertices =
 
-             new float[] {
-                -0.5f, -0.5f, 0.0f, 1.0f, 0.0f, 0.0f, //Bottom-left vertex
-                0.5f, -0.5f, 0.0f, 0.0f, 1.0f, 0.0f, //Bottom-right vertex
-                0.0f,  0.5f, 0.0f, 0.0f, 0.0f, 1.0f  //Top vertex
-            };
+            // new float[] {
+            //    -0.5f, -0.5f, 0.0f, 1.0f, 0.0f, 0.0f, //Bottom-left vertex
+            //    0.5f, -0.5f, 0.0f, 0.0f, 1.0f, 0.0f, //Bottom-right vertex
+            //    0.0f,  0.5f, 0.0f, 0.0f, 0.0f, 1.0f  //Top vertex
+            //};
+
+            Game = new MainLoop(this);
             //Code goes here
         }
 
@@ -62,12 +68,10 @@ namespace opentk3
 
             GL.Clear(ClearBufferMask.ColorBufferBit);
 
-            for (int i = 0; i < 1; i++)
-            {
-                t.FullDraw();
-                tb.FullDraw();
-                tbb.FullDraw();
-            }
+            var mat = Game.Camera.WorldToScreenMatrix(Size);
+
+            foreach (Table t in Tables)
+                t.FullDraw(mat);
 
             //foreach (KeyValuePair<string, Table> tableKey )
 
@@ -88,12 +92,9 @@ namespace opentk3
             base.OnUnload();
         }
     }
-
-    public static class GlobalTables
-    {
-        public static Table[] tables = [];
-
-
+    public static class Tables
+    { 
+    
     }
 
     /// <summary>
@@ -101,15 +102,15 @@ namespace opentk3
     /// </summary>
     public class Table
     {
-        public float[] vertices = {
-    -0.5f, -0.5f, 0.0f, //Bottom-left vertex
-     0.5f, -0.5f, 0.0f, //Bottom-right vertex
-     0.0f,  0.5f, 0.0f  //Top vertex
-};
-        uint[] indices =
-{
-            0,1,2
-        };
+//        public float[] vertices = {
+//    -0.5f, -0.5f, 0.0f, //Bottom-left vertex
+//     0.5f, -0.5f, 0.0f, //Bottom-right vertex
+//     0.0f,  0.5f, 0.0f  //Top vertex
+//};
+//        uint[] indices =
+//{
+//            0,1,2
+//        };
 
         public static int count = 0;
         public int ID;
@@ -124,21 +125,23 @@ namespace opentk3
         int VertexArrayObject; //how the points are stored (attributes)
         int ElementBufferObject; // indexes of the points (sets of triangles)
 
-        
+        public List<MeshData> Meshes = new List<MeshData>();
 
         public float[] Vertices = new float[0];
         public uint[] Indices = new uint[0];
 
         public bool UseMatrix = false;
 
-        public Table(Renderer r, string vertexPath, string fragmentPath)
+        public Table(Renderer r, string vertexPath, string fragmentPath, bool rawCode = false)
         {
+            
+            
             ID = count++;
 
             renderer = r;
             renderer.Unload += Unload;
 
-            shader = new FullShader(vertexPath, fragmentPath);
+            shader = new FullShader(vertexPath, fragmentPath, rawCode);
 
             GenerateBuffers();
 
@@ -178,9 +181,9 @@ namespace opentk3
 
         public void UpdateBuffer()
         {
-            GL.BufferData(BufferTarget.ArrayBuffer, vertices.Length * sizeof(float), vertices, BufferUsageHint.StreamDraw);
+            GL.BufferData(BufferTarget.ArrayBuffer, Vertices.Length * sizeof(float), Vertices, BufferUsageHint.StreamDraw);
 
-            GL.BufferData(BufferTarget.ElementArrayBuffer, indices.Length * sizeof(uint), indices, BufferUsageHint.StreamDraw);
+            GL.BufferData(BufferTarget.ElementArrayBuffer, Indices.Length * sizeof(uint), Indices, BufferUsageHint.StreamDraw);
         }
 
         public void BindBuffers() //should come before updating the buffers
@@ -199,15 +202,58 @@ namespace opentk3
         public void FullDraw(Matrix4 ViewMatrix)
         {
             shader.shader.Use();
-            GL.UniformMatrix4(GL.GetUniformLocation(shader.shader.Handle, "view"), true, ref ViewMatrix);
-            Draw();
+            int loc = GL.GetUniformLocation(shader.shader.Handle, "view");
+            if (loc != -1)
+            {
+                GL.UniformMatrix4(loc, true, ref ViewMatrix);
+            }
+                Draw();
+        }
+
+        void UpdateRenderData()
+        {
+            //makes all the meshes generate thier render data and makes the arrays long enough for the data
+            //{
+            int length1 = 0;
+            int length2 = 0;
+
+            for (int i = 0; i < Meshes.Count; i++)
+            {
+                var mesh = Meshes[i];
+                mesh.Transform();
+                mesh.GenerateRenderData(length1);
+                length1 += mesh.RenderData.Length;
+                length2 += mesh.RenderData1.Length;
+            }
+
+            if (Vertices.Length != length1)
+                Array.Resize(ref Vertices, length1);
+
+            if (Indices.Length != length2)
+                Array.Resize(ref Indices, length2);
+            //}
+
+            int index1 = 0; //the indexes of where in the array the data will be copied to
+            int index2 = 0;
+
+            foreach (MeshData m in Meshes)
+            {
+                //copy over vertex data
+                Array.Copy(m.RenderData, 0, Vertices, index1, m.RenderData.Length);
+                index1 += m.RenderData.Length;
+
+                //copy over indcies
+                Array.Copy(m.RenderData1, 0, Indices, index2, m.RenderData1.Length);
+                index2 += m.RenderData1.Length;
+            } //completed all vertex data
         }
 
         void Draw()
         {
+            UpdateRenderData();
             BindBuffers();
             UpdateBuffer();
-            GL.DrawElements(PrimitiveType.Triangles, 3, DrawElementsType.UnsignedInt, 0);
+            GL.DrawElements(PrimitiveType.Triangles, Indices.Length, DrawElementsType.UnsignedInt, 0);
         }
 
         public void Unload()
@@ -240,11 +286,11 @@ namespace opentk3
         public UniformInfo[] Uniforms = [];
 
 
-        public FullShader(string vertexPath, string fragmentPath)
+        public FullShader(string vertexPath, string fragmentPath, bool rawCode)
         {
             ID = count++;
 
-            shader = new Shader(vertexPath, fragmentPath);
+            shader = new Shader(vertexPath, fragmentPath, rawCode);
 
             ProgramID = shader.Handle;
 
@@ -324,11 +370,21 @@ namespace opentk3
             GL.UseProgram(Handle);
         }
 
-        public Shader(string vertexPath, string fragmentPath)
+        public Shader(string vertexPath, string fragmentPath, bool rawCode = false)
         {
-            string VertexShaderSource = File.ReadAllText(vertexPath);
+            string VertexShaderSource;
 
-            string FragmentShaderSource = File.ReadAllText(fragmentPath);
+            if (rawCode)
+                VertexShaderSource = vertexPath;
+            else 
+                VertexShaderSource = File.ReadAllText(vertexPath);
+
+            string FragmentShaderSource;
+
+            if (rawCode)
+                FragmentShaderSource = fragmentPath; 
+            else
+                FragmentShaderSource = File.ReadAllText(fragmentPath);
 
             VertexShader = GL.CreateShader(ShaderType.VertexShader);
             GL.ShaderSource(VertexShader, VertexShaderSource);
@@ -382,6 +438,11 @@ namespace opentk3
         {
             return GL.GetAttribLocation(Handle, attribName);
         }
+        public int GetUniformLocation(string uniformName)
+        {
+            return GL.GetUniformLocation(Handle, uniformName);
+        }
+        
         private bool disposedValue = false;
 
         protected virtual void Dispose(bool disposing)
